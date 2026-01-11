@@ -1,18 +1,11 @@
 package com.leong.jetchat
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -41,19 +34,30 @@ fun AppRoot() {
     val nav = rememberNavController()
     val authVm: AuthViewModel = hiltViewModel()
 
-    val user by authVm.currentUser.collectAsState(initial = null)
+    val user by authVm.currentUser.collectAsState()
     val userId = user?.uid
 
     LaunchedEffect(userId) {
-        val target = if (userId == null) Routes.LOGIN else Routes.CONVERSATIONS
-        val current = nav.currentBackStackEntry?.destination?.route
+        val currentRoute = nav.currentBackStackEntry?.destination?.route
 
-        if (current == target) return@LaunchedEffect
+        val inAuth = currentRoute == Routes.LOGIN || currentRoute == Routes.REGISTER
+        val signedIn = userId != null
 
-        nav.navigate(target) {
-            // Clear back stack so you can't back-navigate into auth screens after login (and vice versa)
-            popUpTo(nav.graph.findStartDestination().id) { inclusive = true }
-            launchSingleTop = true
+        // Signed in: only redirect if you're on auth screens
+        if (signedIn && inAuth) {
+            nav.navigate(Routes.CONVERSATIONS) {
+                popUpTo(nav.graph.findStartDestination().id) { inclusive = true }
+                launchSingleTop = true
+            }
+            return@LaunchedEffect
+        }
+
+        // Signed out: only redirect if you're NOT on auth screens
+        if (!signedIn && !inAuth) {
+            nav.navigate(Routes.LOGIN) {
+                popUpTo(nav.graph.findStartDestination().id) { inclusive = true }
+                launchSingleTop = true
+            }
         }
     }
 
