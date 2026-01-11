@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -40,6 +41,12 @@ fun AppRoot() {
     val nav = rememberNavController()
     val authVm: AuthViewModel = hiltViewModel()
     val authState by authVm.authState.collectAsState()
+
+    fun popNavBackStackSafe() {
+        if (nav.currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+            nav.popBackStack()
+        }
+    }
 
     LaunchedEffect(authState) {
         val route = nav.currentBackStackEntry?.destination?.route
@@ -95,7 +102,7 @@ fun AppRoot() {
         }
 
         composable(Routes.REGISTER) {
-            RegisterScreen(onGoLogin = { nav.popBackStack() })
+            RegisterScreen(onGoLogin = { popNavBackStackSafe() })
         }
 
         composable(Routes.CONVERSATIONS) {
@@ -109,7 +116,7 @@ fun AppRoot() {
 
         composable(Routes.NEW_CHAT) {
             NewChatScreen(
-                onBack = { nav.popBackStack() },
+                onBack = { popNavBackStackSafe() },
                 onOpenChat = { convoId ->
                     nav.navigate(Routes.chat(convoId)) {
                         popUpTo(Routes.CONVERSATIONS) { inclusive = false }
@@ -120,14 +127,14 @@ fun AppRoot() {
         }
 
         composable(Routes.PROFILE) {
-            ProfileScreen(onBack = { nav.popBackStack() })
+            ProfileScreen(onBack = { popNavBackStackSafe() })
         }
 
         composable(
             route = Routes.CHAT,
             arguments = listOf(navArgument("conversationId") { type = NavType.StringType })
         ) {
-            ChatScreen(onBack = { nav.popBackStack() })
+            ChatScreen(onBack = { popNavBackStackSafe() })
         }
     }
 }
