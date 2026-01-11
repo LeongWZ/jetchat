@@ -95,7 +95,8 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .consumeWindowInsets(padding)
+                .consumeWindowInsets(padding) // Here we will consume the windowInsets. And hence there won't be any padding when keyboard is open.
+                .imePadding(), // This is very important as well, otherwise the scroll won't work when the keyboard is shown
         ) {
             when {
                 isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
