@@ -19,9 +19,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
@@ -44,24 +43,18 @@ class ChatViewModel @Inject constructor(
     private val conversationId: String = checkNotNull(savedStateHandle["conversationId"])
     private val myUid: String = checkNotNull(auth.currentUser?.uid)
 
-    // Individual states
-
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
-
-    private val _isMessagesLoading = MutableStateFlow(true)
 
     /**
      * Cache of sender display values, keyed by uid.
      *
-     * - Key:   uid
-     * - Value: display string (email or uid fallback) when resolved, or `null` while a fetch is in progress.
-     *
-     * Note: If a user document does not exist, we fall back to using the uid as the display string,
-     * so the cache will eventually contain a non-null value for that uid; `null` only represents
-     * a pending/ongoing fetch, never "user doesn't exist".
+     * - Key: uid
+     * - Value: display string (email or uid fallback) when resolved,
+     *          or `null` while a fetch is in progress.
      */
     private val senderCache = MutableStateFlow<Map<String, String?>>(emptyMap())
 
@@ -81,7 +74,7 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        // mark as pending immediately so we can show senders-loading
+        // mark as pending immediately
         senderCache.update { it + (uid to null) }
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -96,44 +89,26 @@ class ChatViewModel @Inject constructor(
     // Single upstream Firestore listener (shared)
     private val rawMessages: SharedFlow<List<Pair<String, Message>>> =
         chatRepo.observeMessages(conversationId)
-            .catch { e ->
-                _error.value = e.message ?: "Failed to load messages"
+            .catch { e -> _error.value = e.message ?: "Failed to load messages" }
+            .onEach { pairs ->
+                pairs.asSequence()
+                    .map { (_, m) -> m.senderId }
+                    .distinct()
+                    .forEach(::ensureSender)
             }
             .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
-    // Track which senderIds are currently needed (based on current messages)
-    private val neededSenderIds: StateFlow<Set<String>> =
-        rawMessages
-            .map { pairs -> pairs.map { (_, m) -> m.senderId }.toSet() }
-            .onEach { ids ->
-                // kick off lazy resolution only for ids we actually need
-                ids.forEach { ensureSender(it) }
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
-
-    init {
-        // messages loading ends on first snapshot (even if empty)
-        viewModelScope.launch {
-            rawMessages.take(1).collect { _isMessagesLoading.value = false }
-        }
-    }
-
-    // sender-cache loading: true if any needed sender is still pending
-    val isSendersLoading: StateFlow<Boolean> =
-        combine(neededSenderIds, senderCache) { ids, cache ->
-            ids.any { uid -> cache[uid] == null }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     // overall loading (what you show as spinner)
     val isLoading: StateFlow<Boolean> =
-        combine(_isMessagesLoading, isSendersLoading) { msgsLoading, sendersLoading ->
-            msgsLoading || sendersLoading
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+        rawMessages
+            .map { false }                 // once we see any emission, loading = false
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    // Messages UI: show uid while sender is pending, then update to email when resolved
     val messagesUi: StateFlow<List<MessageUi>> =
         combine(rawMessages, senderCache) { pairs, cache ->
             pairs.map { (id, m) ->
-                val senderDisplay = cache[m.senderId] ?: m.senderId // pending -> show uid for now
+                val senderDisplay = cache[m.senderId] ?: m.senderId // pending -> show uid
 
                 MessageUi(
                     id = id,
@@ -143,8 +118,7 @@ class ChatViewModel @Inject constructor(
                     isMine = (myUid == m.senderId)
                 )
             }
-        }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun onDraftChange(v: String) {
         _draft.value = v

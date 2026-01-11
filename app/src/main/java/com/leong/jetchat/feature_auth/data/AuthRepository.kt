@@ -15,12 +15,19 @@ class AuthRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val usersRepo: UsersRepository
 ) {
+
+    val currentUserNow: FirebaseUser?
+        get() = auth.currentUser
+
     val currentUser: Flow<FirebaseUser?> = callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { fa ->
             trySend(fa.currentUser)
         }
         auth.addAuthStateListener(listener)
-        trySend(auth.currentUser) // emit immediately
+
+        // immediate emit
+        trySend(auth.currentUser)
+
         awaitClose { auth.removeAuthStateListener(listener) }
     }
 
