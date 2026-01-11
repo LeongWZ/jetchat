@@ -3,12 +3,9 @@ package com.leong.jetchat.feature_profile.presentation
 import android.content.ClipData
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
@@ -17,10 +14,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,32 +60,44 @@ fun ProfileScreen(
         ) {
             Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Email")
-                        Text(ui.email ?: "-")
-                    }
-
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("UID")
-                        Text(ui?.uid ?: "-")
-                    }
-
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(
-                            onClick = {
-                                val text = buildString {
-                                    append("Email: ${ui.email ?: "-"}\n")
-                                    append("UID: ${ui.uid ?: "-"}")
-                                }
-                                val clipData = ClipData.newPlainText(text, text)
-                                scope.launch { clipboard.setClipEntry(clipData.toClipEntry()) }
+                    ListItem(
+                        headlineContent = { Text("Email") },
+                        supportingContent = {
+                            Text(ui.email ?: "-")
+                        },
+                        trailingContent = {
+                            IconButton(
+                                onClick = {
+                                    val text = ui.email ?: "-"
+                                    val clipData = ClipData.newPlainText(text, text)
+                                    scope.launch { clipboard.setClipEntry(clipData.toClipEntry()) }
+                                },
+                                enabled = ui.email != null
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy email")
                             }
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy")
                         }
-                    }
+                    )
+
+                    ListItem(
+                        headlineContent = { Text("UID") },
+                        supportingContent = {
+                            Text(ui.uid ?: "-")
+                        },
+                        trailingContent = {
+                            IconButton(
+                                onClick = {
+                                    val text = ui.uid ?: "-"
+                                    val clipData = ClipData.newPlainText(text, text)
+                                    scope.launch { clipboard.setClipEntry(clipData.toClipEntry()) }
+                                },
+                                enabled = ui.uid != null
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy UID")
+                            }
+                        }
+                    )
+
                 }
             }
 
