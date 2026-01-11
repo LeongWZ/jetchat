@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -94,6 +95,7 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .consumeWindowInsets(padding)
         ) {
             when {
                 isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -140,7 +142,6 @@ fun ChatScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .imePadding()
                             .padding(8.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
