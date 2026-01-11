@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
@@ -38,6 +40,7 @@ fun ProfileScreen(
 
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
+    val scroll = rememberScrollState()
 
     Scaffold(
         topBar = {
@@ -55,7 +58,8 @@ fun ProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(scroll),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Card {
