@@ -29,8 +29,15 @@ data class MessageUi(
     val sender: String,
     val text: String,
     val time: String,
-    val isMine: Boolean
+    val isMine: Boolean,
+    val isDeleted: Boolean,
+    val isEdited: Boolean
 )
+
+sealed interface ComposerMode {
+    data object Normal : ComposerMode
+    data class Editing(val messageId: String) : ComposerMode
+}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -48,6 +55,16 @@ class ChatViewModel @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
+
+    private val _composerMode = MutableStateFlow<ComposerMode>(ComposerMode.Normal)
+    val composerMode: StateFlow<ComposerMode> = _composerMode
+
+    // Message actions UI state
+    private val _actionMenuFor = MutableStateFlow<String?>(null) // messageId or null
+    val actionMenuFor: StateFlow<String?> = _actionMenuFor
+
+    private val _confirmDeleteFor = MutableStateFlow<String?>(null) // messageId or null
+    val confirmDeleteFor: StateFlow<String?> = _confirmDeleteFor
 
     /**
      * Cache of sender display values, keyed by uid.
@@ -109,27 +126,98 @@ class ChatViewModel @Inject constructor(
         combine(rawMessages, senderCache) { pairs, cache ->
             pairs.map { (id, m) ->
                 val senderDisplay = cache[m.senderId] ?: m.senderId // pending -> show uid
+                val isDeleted = m.isDeleted || (m.deletedAt != null) || (m.deletedBy != null)
+                val isEdited = (m.editedAt != null)
 
                 MessageUi(
                     id = id,
                     sender = senderDisplay,
-                    text = m.text,
+                    text = if (isDeleted) "Message deleted" else m.text,
                     time = m.createdAt?.toDate()?.toString() ?: "",
-                    isMine = (myUid == m.senderId)
+                    isMine = (myUid == m.senderId),
+                    isDeleted = isDeleted,
+                    isEdited = isEdited
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // --- Draft / composer actions ---
 
     fun onDraftChange(v: String) {
         _draft.value = v
     }
 
-    fun send() = viewModelScope.launch {
+    fun openActions(messageId: String) {
+        _actionMenuFor.value = messageId
+    }
+
+    fun dismissActions() {
+        _actionMenuFor.value = null
+    }
+
+    fun requestDelete(messageId: String) {
+        _actionMenuFor.value = null
+        _confirmDeleteFor.value = messageId
+    }
+
+    fun cancelDelete() {
+        _confirmDeleteFor.value = null
+    }
+
+    fun startEdit(messageId: String) {
+        val msg = messagesUi.value.firstOrNull { it.id == messageId } ?: run {
+            _error.value = "Message not found"
+            _actionMenuFor.value = null
+            return
+        }
+        if (!msg.isMine || msg.isDeleted) {
+            _actionMenuFor.value = null
+            return
+        }
+
+        _composerMode.value = ComposerMode.Editing(messageId)
+        _draft.value = msg.text
+        _actionMenuFor.value = null
+    }
+
+    fun cancelEdit() {
+        _composerMode.value = ComposerMode.Normal
+        _draft.value = ""
+    }
+
+    fun sendOrSave() = viewModelScope.launch {
         val text = _draft.value
         if (text.isBlank()) return@launch
 
-        runCatching { chatRepo.sendMessage(conversationId, myUid, text) }
-            .onFailure { e -> _error.value = e.message ?: "Failed to send message" }
-            .onSuccess { _draft.value = "" }
+        when (val mode = _composerMode.value) {
+            is ComposerMode.Normal -> {
+                runCatching { chatRepo.sendMessage(conversationId, myUid, text) }
+                    .onFailure { e -> _error.value = e.message ?: "Failed to send message" }
+                    .onSuccess { _draft.value = "" }
+            }
+            is ComposerMode.Editing -> {
+                runCatching { chatRepo.editMessage(conversationId, mode.messageId, myUid, text) }
+                    .onFailure { e -> _error.value = e.message ?: "Failed to edit message" }
+                    .onSuccess {
+                        _composerMode.value = ComposerMode.Normal
+                        _draft.value = ""
+                    }
+            }
+        }
+    }
+
+    fun confirmDelete() = viewModelScope.launch {
+        val id = _confirmDeleteFor.value ?: return@launch
+        _confirmDeleteFor.value = null
+
+        // If user is editing this message, exit edit mode
+        val mode = _composerMode.value
+        if (mode is ComposerMode.Editing && mode.messageId == id) {
+            _composerMode.value = ComposerMode.Normal
+            _draft.value = ""
+        }
+
+        runCatching { chatRepo.deleteMessage(conversationId, id, myUid) }
+            .onFailure { e -> _error.value = e.message ?: "Failed to delete message" }
     }
 }

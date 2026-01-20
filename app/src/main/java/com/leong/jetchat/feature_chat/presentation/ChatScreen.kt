@@ -1,5 +1,6 @@
 package com.leong.jetchat.feature_chat.presentation
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,7 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +60,9 @@ fun ChatScreen(
     val isLoading by vm.isLoading.collectAsState()
     val error by vm.error.collectAsState()
     val messages by vm.messagesUi.collectAsState()
+    val composerMode by vm.composerMode.collectAsState()
+    val actionMenuFor by vm.actionMenuFor.collectAsState()
+    val confirmDeleteFor by vm.confirmDeleteFor.collectAsState()
 
     val listState = rememberLazyListState()
 
@@ -77,6 +86,21 @@ fun ChatScreen(
         if (isAtBottom || newestIsMine) {
             listState.animateScrollToItem(0)
         }
+    }
+
+    // Delete confirm dialog
+    if (confirmDeleteFor != null) {
+        AlertDialog(
+            onDismissRequest = vm::cancelDelete,
+            title = { Text("Delete message?") },
+            text = { Text("This will replace the message with \"Message deleted\".") },
+            confirmButton = {
+                TextButton(onClick = vm::confirmDelete) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = vm::cancelDelete) { Text("Cancel") }
+            }
+        )
     }
 
     Scaffold(
@@ -121,17 +145,76 @@ fun ChatScreen(
                             items = reversedMessages,
                             key = { it.id }
                         ) { m ->
-                            Row(
+                            val canAct = m.isMine && !m.isDeleted
+
+                            Box(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = if (m.isMine) Arrangement.End else Arrangement.Start
+                                contentAlignment = if (m.isMine) Alignment.TopEnd else Alignment.TopStart
                             ) {
-                                Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 1.dp) {
-                                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                        Text(m.sender, style = MaterialTheme.typography.labelMedium)
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(m.text)
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(m.time, style = MaterialTheme.typography.labelSmall)
+                                Box {
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        tonalElevation = 1.dp,
+                                        modifier = Modifier
+                                            .combinedClickable(
+                                                onClick = { /* no-op */ },
+                                                onLongClick = {
+                                                    if (canAct) vm.openActions(m.id)
+                                                }
+                                            )
+                                    ) {
+                                        Column(
+                                            Modifier.padding(
+                                                horizontal = 12.dp,
+                                                vertical = 8.dp
+                                            )
+                                        ) {
+                                            Text(
+                                                m.sender,
+                                                style = MaterialTheme.typography.labelMedium
+                                            )
+                                            Spacer(Modifier.height(4.dp))
+
+                                            if (m.isDeleted) {
+                                                Text(
+                                                    "Message deleted",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            } else {
+                                                Text(m.text)
+                                            }
+
+                                            Spacer(Modifier.height(4.dp))
+
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    m.time,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                                if (!m.isDeleted && m.isEdited) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(
+                                                        "edited",
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = actionMenuFor == m.id,
+                                        onDismissRequest = vm::dismissActions
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Edit") },
+                                            onClick = { vm.startEdit(m.id) }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Delete") },
+                                            onClick = { vm.requestDelete(m.id) }
+                                        )
                                     }
                                 }
                             }
@@ -139,6 +222,25 @@ fun ChatScreen(
                     }
 
                     HorizontalDivider()
+
+                    // Editing Banner
+                    if (composerMode is ComposerMode.Editing) {
+                        Surface(tonalElevation = 1.dp) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Editing message",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = vm::cancelEdit) { Text("Cancel") }
+                            }
+                        }
+                    }
 
                     Row(
                         modifier = Modifier
@@ -149,20 +251,29 @@ fun ChatScreen(
                         OutlinedTextField(
                             value = draft,
                             onValueChange = vm::onDraftChange,
-                            placeholder = { Text("Message") },
+                            placeholder = {
+                                Text(
+                                    if (composerMode is ComposerMode.Editing) "Edit message"
+                                    else "Message"
+                                )
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .heightIn(min = SingleLineFieldMinHeight),
                             maxLines = 4,
                         )
+
                         Spacer(Modifier.width(8.dp))
+
                         IconButton(
-                            onClick = vm::send,
+                            onClick = vm::sendOrSave,
                             enabled = draft.isNotBlank(),
-                            modifier = Modifier
-                                .heightIn(min = SingleLineFieldMinHeight)
+                            modifier = Modifier.heightIn(min = SingleLineFieldMinHeight)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = if (composerMode is ComposerMode.Editing) "Save" else "Send"
+                            )
                         }
                     }
                 }
