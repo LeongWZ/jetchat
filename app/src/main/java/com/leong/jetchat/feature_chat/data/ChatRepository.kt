@@ -3,6 +3,7 @@ package com.leong.jetchat.feature_chat.data
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import com.leong.jetchat.core.model.Message
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -20,7 +21,7 @@ class ChatRepository @Inject constructor (
         val q = db.collection("conversations")
             .document(conversationId)
             .collection("messages")
-            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.ASCENDING)
+            .orderBy("createdAt", Query.Direction.ASCENDING)
             .limit(limit)
 
         val reg: ListenerRegistration = q.addSnapshotListener { snap, err ->
@@ -40,32 +41,124 @@ class ChatRepository @Inject constructor (
     }
 
     suspend fun sendMessage(conversationId: String, senderId: String, text: String) {
-        val msgId = db.collection("conversations")
+        val convoRef = db.collection("conversations")
             .document(conversationId)
+
+        val msgId = convoRef
             .collection("messages")
             .document().id
-
         val clientId = UUID.randomUUID().toString()
 
         val msg = mapOf(
             "senderId" to senderId,
             "text" to text,
             "createdAt" to FieldValue.serverTimestamp(),
-            "clientId" to clientId
+            "clientId" to clientId,
+            "isDeleted" to false
         )
 
-        val convoRef = db.collection("conversations").document(conversationId)
         val msgRef = convoRef.collection("messages").document(msgId)
 
-        // Write message
-        msgRef.set(msg).await()
+        db.runTransaction { tx ->
+            // Write message
+            tx.set(msgRef, msg)
 
-        convoRef.update(
-            mapOf(
-                "lastMessageText" to text,
-                "lastMessageAt" to FieldValue.serverTimestamp(),
-                "lastSenderId" to senderId
+            // Update convo preview
+            tx.update(
+                convoRef,
+                mapOf(
+                    "lastMessageId" to msgId,
+                    "lastMessageText" to text,
+                    "lastMessageAt" to FieldValue.serverTimestamp(),
+                    "lastSenderId" to senderId
+                )
             )
-        ).await()
+
+            null
+        }.await()
+    }
+
+    /**
+     * Overwrite edit.
+     * - Updates message text + editedAt (+ editedBy)
+     * - If this message is the conversation's lastMessageId, update lastMessageText too.
+     *
+     * NOTE: we intentionally do NOT change createdAt, and we do not bump ordering.
+     */
+    suspend fun editMessage(
+        conversationId: String,
+        messageId: String,
+        editorUid: String,
+        newText: String
+    ) {
+        val convoRef = db.collection("conversations").document(conversationId)
+        val msgRef = convoRef.collection("messages").document(messageId)
+
+        db.runTransaction { tx ->
+            val convoSnap = tx.get(convoRef)
+            val lastId = convoSnap.getString("lastMessageId")
+
+            val msgSnap = tx.get(msgRef)
+            if (!msgSnap.exists()) throw IllegalStateException("Message not found")
+
+            val isDeleted = msgSnap.getBoolean("isDeleted") == true
+            if (isDeleted) throw IllegalStateException("Cannot edit a deleted message")
+
+            val senderId = msgSnap.getString("senderId")
+            if (senderId != editorUid) throw IllegalStateException("You can only edit your own messages")
+
+            tx.update(
+                msgRef, mapOf(
+                    "text" to newText,
+                    "editedAt" to FieldValue.serverTimestamp(),
+                    "editedBy" to editorUid
+                )
+            )
+
+            if (lastId == messageId) {
+                tx.update(convoRef, mapOf("lastMessageText" to newText))
+            }
+        }.await()
+    }
+
+    /**
+     * Soft delete.
+     * - Sets isDeleted + deletedAt + deletedBy
+     * - Clears text to avoid retaining deleted content
+     * - If this message is the convo lastMessageId, set lastMessageText to placeholder
+     */
+    suspend fun deleteMessage(conversationId: String, messageId: String, deleterUid: String) {
+        val convoRef = db.collection("conversations").document(conversationId)
+        val msgRef = convoRef.collection("messages").document(messageId)
+
+        db.runTransaction { tx ->
+            val convoSnap = tx.get(convoRef)
+            val lastId = convoSnap.getString("LastMessageId")
+
+            val msgSnap = tx.get(msgRef)
+            if (!msgSnap.exists()) throw IllegalStateException("Message not found")
+
+            val senderId = msgSnap.getString("senderId")
+            if (senderId != deleterUid) throw IllegalStateException("You can only delete your own messages")
+
+            val alreadyDeleted = msgSnap.getBoolean("isDeleted") == true
+            if (alreadyDeleted) return@runTransaction null
+
+            tx.update(
+                msgRef,
+                mapOf(
+                    "isDeleted" to true,
+                    "deletedAt" to FieldValue.serverTimestamp(),
+                    "deletedBy" to deleterUid,
+                    "text" to ""    // wipe content
+                )
+            )
+
+            if (lastId == messageId) {
+                tx.update(convoRef, mapOf("lastMessageText" to "Message deleted"))
+            }
+
+            return@runTransaction null
+        }.await()
     }
 }
